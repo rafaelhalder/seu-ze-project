@@ -1,9 +1,13 @@
 import { env } from "@/env";
 import { WebSocketClient } from "@/infrastructure/websocket/WebSocketClient";
 import { MessageHandlerService } from "@/application/services/MessageHandlerService";
+import { PrismaMessageRepository } from "@/infrastructure/database/repositories/PrismaMessageRepository";
 
 const webSocketClient = new WebSocketClient(env.EVOLUTION_URL_WITH_INSTANCE);
-const messageHandlerService = new MessageHandlerService();
+const messageRepository = new PrismaMessageRepository();
+const messageHandlerService = new MessageHandlerService(
+  messageRepository
+);
 
 function setupApplicationEventHandlers(): void{
   webSocketClient.on("connected",() => {
