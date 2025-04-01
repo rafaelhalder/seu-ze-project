@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    // Define a versão do ECMAScript que o código será compilado.
+    "target": "ES2022",
+
+    // Especifica as bibliotecas padrão que serão incluídas no projeto.
+    "lib": ["ES2023"],
+
+    // Configura caminhos de mapeamento para facilitar a importação de módulos.
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    // Define o sistema de módulos que será utilizado.
+    "module": "Node16",
+
+    // Permite a interoperabilidade com módulos ES.
+    "esModuleInterop": true,
+
+    // Garante que o uso de maiúsculas e minúsculas nos nomes dos arquivos seja consistente.
+    "forceConsistentCasingInFileNames": true,
+
+    // Ativa verificações estritas de tipo.
+    "strict": true,
+
+    //Pular a verificação das bibliotecas padrão.
+    "skipLibCheck": true
+  }
+}
