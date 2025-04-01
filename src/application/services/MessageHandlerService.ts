@@ -19,6 +19,35 @@ export class MessageHandlerService implements IMessegeHandlerService{
     this.messageRepository.save(formattedMessage); // Salva a mensagem no banco de dados
     // Por exemplo, você pode enviar a mensagem para o WhatsApp ou gerar uma resposta
 
+    if(!this.shouldRespondToMessage(message)){
+      return;
+    }
+
+    if(message.type === MessageType.TEXT){
+      await this.proccessMessageInformation(message);
+
+    }
+
+  }
+
+  private shouldRespondToMessage(message: Message): boolean {
+    if(message.fromMe){
+      return false
+    }
+  
+  if(message.remoteJid.includes('@g.us')){
+    return false
+  }
+
+  return true
+}
+
+  private proccessMessageInformation(message: Message): Promise<String | void> {
+    // Aqui você pode implementar a lógica para processar a mensagem
+    // Por exemplo, você pode analisar o conteúdo da mensagem e gerar uma resposta
+    console.log("Processando mensagem:", message);
+    return Promise.resolve();
+  
   }
 
   private convertToMessageEntity(evolutionData: any): Message | null {
