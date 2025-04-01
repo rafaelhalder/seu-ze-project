@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,50 +10,101 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  customer
-  sale
-}
-
-enum DeliveryStatus {
-  shipped
-  processing
-  delivered
+enum Role {
+  USER
+  ADMIN
 }
 
 model User {
-  id         String     @id @default(uuid())
-  name       String
-  password   String
-  email      String     @unique
-  role       UserRole   @default(customer)
-  deliveries Delivery[]
-  createdAt  DateTime   @default(now()) @map("created_at")
-  updatedAt  DateTime?  @updatedAt @map("updated_at")
+  id           String          @id @default(uuid())
+  phoneNumber  String?         @unique @map("phone_number") // Número de telefone com formato @s.whatsapp.net
+  name         String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  metadata     UserMetadata[]
+  sentiments   UserSentiment[]
+  Conversation Conversation[]
+  LogsWhatsApp LogsWhatsApp[]
 
   @@map("users")
 }
 
-model Delivery {
-  id          String         @id @default(uuid())
-  userId      String         @map("user_id")
-  description String
-  status      DeliveryStatus @default(processing)
-  logs        DeliveryLog[]
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime?      @updatedAt @map("updated_at")
-  user        User           @relation(fields: [userId], references: [id])
+model LogsWhatsApp {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  action      String
+  messageUser String   @map("message_user")
+  messageBot  String   @map("message_bot")
+  status      String
+  type        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
 
-  @@map("deliveries")
+  @@map("logs_whatsapp")
 }
 
-model DeliveryLog {
-  id          String    @id @default(uuid())
-  description String
-  deliveryId  String    @map("delivery_id")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime? @updatedAt @map("updated_at")
-  delivery    Delivery  @relation(fields: [deliveryId], references: [id])
+model Conversation {
+  id        String        @id @default(uuid())
+  userId    String        @map("user_id")
+  user      User          @relation(fields: [userId], references: [id])
+  title     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
 
-  @@map("delivery_logs")
+  @@map("conversations")
+}
+
+model ChatMessage {
+  id             String       @id @default(uuid())
+  conversationId String       @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  isUserMessage  Boolean      @map("is_user_message")
+  content        String       @db.Text
+  sentAt         DateTime     @default(now()) @map("sent_at")
+
+  @@map("chat_messages")
+}
+
+model UserSentiment {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  date      DateTime @db.Date
+  sentiment Float // -1.0 to 1.0 where negative is bad, positive is good
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // @@unique([userId, date]) // One sentiment record per user per day
+  @@map("user_sentiments")
+}
+
+model UserMetadata {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  key       String // Ex: "aniversario", "conjuge", "local_preferido"
+  value     String // Valor do metadado
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key]) // Um único valor para cada tipo de metadado por usuário
+  @@map("user_metadata")
+}
+
+model Message {
+  id           String   @id
+  remoteJid    String
+  pushName     String
+  conversation String?  @db.Text
+  dateTime     DateTime
+  eventType    String
+  messageType  String
+  fromMe       Boolean
+  answered     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@map("messages")
 }
