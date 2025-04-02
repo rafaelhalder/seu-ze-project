@@ -1,10 +1,14 @@
 import { Message, MessageType } from "@/domain/entities/Message";
+import type { IMemoryService } from "@/domain/interfaces/IMemoryService";
 import type { IMessegeHandlerService } from "@/domain/interfaces/IMessageHandlerService";
 import type { IMessageRepository } from "@/domain/interfaces/IMessageRepository";
+import type { IOpenAIService } from "@/domain/interfaces/IOpenAIService";
 
 export class MessageHandlerService implements IMessegeHandlerService{
   constructor(
     private messageRepository: IMessageRepository,
+    private openAIService: IOpenAIService,
+    private memoryService: IMemoryService,
   ){}
 
 
@@ -19,12 +23,13 @@ export class MessageHandlerService implements IMessegeHandlerService{
     this.messageRepository.save(formattedMessage); // Salva a mensagem no banco de dados
     // Por exemplo, você pode enviar a mensagem para o WhatsApp ou gerar uma resposta
 
-    if(!this.shouldRespondToMessage(message)){
+
+    if(!this.shouldRespondToMessage(formattedMessage)){
       return;
     }
 
-    if(message.type === MessageType.TEXT){
-      await this.proccessMessageInformation(message);
+    if(formattedMessage.type === MessageType.TEXT){
+      await this.proccessMessageInformation(formattedMessage);
 
     }
 
@@ -34,7 +39,6 @@ export class MessageHandlerService implements IMessegeHandlerService{
     if(message.fromMe){
       return false
     }
-  
   if(message.remoteJid.includes('@g.us')){
     return false
   }
@@ -42,10 +46,25 @@ export class MessageHandlerService implements IMessegeHandlerService{
   return true
 }
 
-  private proccessMessageInformation(message: Message): Promise<String | void> {
+  private async proccessMessageInformation(message: Message): Promise<void> {
+
+    try{
+      const [keyInformation] = await Promise.all([
+        this.openAIService.extractMessageInformation(message.content),
+      ]);
+
+      // Salvar informações extraídas
+      if (Object.keys(keyInformation).length > 0) {
+       console.log(' irá salvar');
+        await this.memoryService.saveKeyInformation(message.remoteJid,message.pushName, keyInformation);
+      }
+
+      console.log('Informações extraídas:', keyInformation);
+    }catch(error){
+
+    }
     // Aqui você pode implementar a lógica para processar a mensagem
     // Por exemplo, você pode analisar o conteúdo da mensagem e gerar uma resposta
-    console.log("Processando mensagem:", message);
     return Promise.resolve();
   
   }
