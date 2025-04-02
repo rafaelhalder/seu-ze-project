@@ -78,13 +78,11 @@ export class WebSocketClient extends EventEmitter implements IWebSocketClient {
       this.scheduleReconnect();
     });
     
-    // Ouvir o evento de mensagens da Evolution API
     this.socket.on('messages.upsert', (data) => {
       console.log('Evento messages.upsert recebido');
       this.emit('message', data);
     });
     
-    // Outros eventos relevantes da Evolution API
     this.socket.on('connection.update', (update) => {
       console.log('Status de conexão atualizado:', update);
       this.emit('connectionUpdate', update);

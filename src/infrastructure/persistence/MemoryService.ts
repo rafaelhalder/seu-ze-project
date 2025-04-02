@@ -48,8 +48,6 @@ export class MemoryService implements IMemoryService {
       
       // Para cada informação extraída, atualizar ou criar
       for (const [key, value] of Object.entries(information)) {
-        // Implementar lógica para salvar diferentes tipos de informação
-        // Este é um exemplo simples - ajuste conforme seu schema
         await prisma.userMetadata.upsert({
           where: {
             userId_key: {
@@ -85,8 +83,6 @@ export class MemoryService implements IMemoryService {
       });
       
       if (!user) return {};
-      
-      // Transformar em objeto simples
       const information: Record<string, string> = {};
       
       if (user.metadata) {
