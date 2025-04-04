@@ -3,6 +3,8 @@ import { prisma } from "../database/prisma/prisma";
 
 export class MemoryService implements IMemoryService {
 
+
+
   public async saveSentiment(userId: string, sentiment: number): Promise<void> {
     try {
       // Verificar se o usuário já existe

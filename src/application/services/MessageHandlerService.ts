@@ -3,13 +3,17 @@ import type { IMemoryService } from "@/domain/interfaces/IMemoryService";
 import type { IMessegeHandlerService } from "@/domain/interfaces/IMessageHandlerService";
 import type { IMessageRepository } from "@/domain/interfaces/IMessageRepository";
 import type { IOpenAIService } from "@/domain/interfaces/IOpenAIService";
+import { PrismaClient } from "@prisma/client";
 
 export class MessageHandlerService implements IMessegeHandlerService{
+  private prisma: PrismaClient;
   constructor(
     private messageRepository: IMessageRepository,
     private openAIService: IOpenAIService,
     private memoryService: IMemoryService,
-  ){}
+  ){
+    this.prisma = new PrismaClient();
+  }
 
 
   async handleMessage(message: Message): Promise<void> {
@@ -23,7 +27,6 @@ export class MessageHandlerService implements IMessegeHandlerService{
     this.messageRepository.save(formattedMessage); // Salva a mensagem no banco de dados
     // Por exemplo, você pode enviar a mensagem para o WhatsApp ou gerar uma resposta
 
-
     if(!this.shouldRespondToMessage(formattedMessage)){
       return;
     }
@@ -32,7 +35,6 @@ export class MessageHandlerService implements IMessegeHandlerService{
       await this.proccessMessageInformation(formattedMessage);
 
     }
-
   }
 
   private shouldRespondToMessage(message: Message): boolean {
@@ -47,26 +49,83 @@ export class MessageHandlerService implements IMessegeHandlerService{
 }
 
   private async proccessMessageInformation(message: Message): Promise<void> {
-
-    try{
-      const [keyInformation] = await Promise.all([
+    try {
+      // Obter mensagens anteriores da conversa
+      const recentMessages = await this.messageRepository.getRecentMessages(
+        message.remoteJid,
+        5  // Últimas 5 mensagens
+      );
+      
+      // Extrair apenas o conteúdo das mensagens
+      const messageHistory = recentMessages.map(m => m.content);
+      
+      // Analisar com contexto
+      const [keyInformation, sentimentAnalysis] = await Promise.all([
         this.openAIService.extractMessageInformation(message.content),
+        this.openAIService.analyzeSentiment(message.content, messageHistory)
       ]);
-
+      
       // Salvar informações extraídas
       if (Object.keys(keyInformation).length > 0) {
-       console.log(' irá salvar');
-        await this.memoryService.saveKeyInformation(message.remoteJid,message.pushName, keyInformation);
+        console.log(' irá salvar');
+        await this.memoryService.saveKeyInformation(message.remoteJid, message.pushName, keyInformation);
+      }
+
+      if (sentimentAnalysis && sentimentAnalysis.dominantEmotions && sentimentAnalysis.dominantEmotions?.length > 0) {
+        await this.updateMessageSentiment(message.id, sentimentAnalysis);
+      }
+
+      // Verificar ironia
+      if (sentimentAnalysis?.irony?.detected && sentimentAnalysis.irony.confidence > 0.7) {
+        console.log('Ironia detectada!', sentimentAnalysis.irony);
+        // Lógica adicional para lidar com ironia
       }
 
       console.log('Informações extraídas:', keyInformation);
-    }catch(error){
 
+      const responseText = await this.generateResponse(message, keyInformation, sentimentAnalysis);
+      console.log('Resposta gerada:', responseText);
+
+    } catch(error) {
+      console.error('Erro ao processar informações da mensagem:', error);
     }
-    // Aqui você pode implementar a lógica para processar a mensagem
-    // Por exemplo, você pode analisar o conteúdo da mensagem e gerar uma resposta
-    return Promise.resolve();
-  
+  }
+
+  async updateMessageSentiment(messageId: string, 
+    sentiment: { score: number; label: string; confidence: number; dominantEmotions?: string[] }
+  ): Promise<void> {
+    try{
+      await this.prisma.message.update({
+        where: { id: messageId },
+        data: {
+          sentimentScore: sentiment.score,
+          sentimentLabel: sentiment.label,
+          sentimentConfidence: sentiment.confidence,
+          // If you want to save emotions too, you'd need additional logic here
+        }
+      });
+          // 2. Salvar as emoções dominantes, se existirem
+    if (sentiment.dominantEmotions && sentiment.dominantEmotions.length > 0) {
+      // Criar um registro para cada emoção
+      const emotionPromises = sentiment.dominantEmotions.map((emotion, index) => {
+        // Calcular uma intensidade aproximada com base na posição no array
+        // Primeira emoção tem intensidade maior, as seguintes têm menos
+        const intensity = 1 - (0.2 * index); 
+          console.log(`intensity:`+ Math.max(0.1, intensity));
+        return this.prisma.messageEmotion.create({
+          data: {
+            messageId,
+            emotion,
+            intensity: Math.max(0.1, intensity) // Garantir que é pelo menos 0.1
+          }
+        });
+      });
+      
+      await Promise.all(emotionPromises);
+    }
+    }catch(error){
+      console.error('Error updating message with sentiment:', error);
+    }
   }
 
   private convertToMessageEntity(evolutionData: any): Message | null {
@@ -122,6 +181,31 @@ export class MessageHandlerService implements IMessegeHandlerService{
     } catch (error) {
       console.error('Erro ao converter mensagem:', error);
       return null;
+    }
+  }
+
+  private async generateResponse(message: Message, keyInformation: any, sentimentAnalysis:any): Promise<string>{
+    try{
+      const userContext = await this.memoryService.getUserHistory(message.remoteJid);
+      const recentMessages = await this.messageRepository.getRecentMessages(message.remoteJid, 5);
+      const messageHistory = recentMessages.map(m => ({
+        content: m.content,
+        fromMe: m.fromMe,
+        timestamp: m.timestamp
+      }));
+
+    const response = await this.openAIService.generateResponse({
+      userMessage: message.content,
+      userContext: userContext,
+      conversationHistory: messageHistory,
+      keyInformation: keyInformation,
+      sentiment: sentimentAnalysis
+    });
+    return response;
+      
+    }catch(error){
+      console.error('Erro ao gerar resposta:', error);
+      return 'Desculpe, não consegui processar sua mensagem.';
     }
   }
 }
