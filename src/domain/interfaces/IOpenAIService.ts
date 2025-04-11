@@ -8,10 +8,11 @@ export interface IOpenAIService {
     dominantEmotions?: string[]; // Optional array of emotions
   }>;
   generateResponse(params: {
+    messageId: string;
     userMessage: string;
     userContext: any;
     conversationHistory: any[];
-    keyInformation: any;
     sentiment: any;
+    emotionalProfile: any;
   }): Promise<string>;
 }

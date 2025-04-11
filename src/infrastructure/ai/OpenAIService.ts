@@ -56,18 +56,23 @@ export class OpenAIService implements IOpenAIService {
     }
   }
   
-  async analyzeSentiment(message: string, previousMessages?: string[]): Promise<{
-    score: number;
-    label: string;
-    confidence: number;
-    dominantEmotions: string[];
-    irony: {
-      detected: boolean;
+  async analyzeSentiment(
+    message: string, 
+    previousMessages?: string[], 
+    options?: { notifyIrony?: boolean }
+  ): Promise<{
+      score: number;
+      label: string;
       confidence: number;
-    };
+      dominantEmotions: string[];
+      irony: {
+        detected: boolean;
+        confidence: number;
+        notified?: boolean; // New field to indicate if notification was sent
+      };
     }> {
     try {
-      // Criar um contexto incluindo mensagens anteriores, se disponíveis
+      // Create context with previous messages if available
       const contextPrompt = previousMessages && previousMessages.length > 0 
         ? `Contexto anterior:\n${previousMessages.join('\n')}\n\nMensagem atual: ${message}`
         : message;
@@ -79,7 +84,8 @@ export class OpenAIService implements IOpenAIService {
         system: `
         Analise o sentimento da mensagem a seguir (considere qualquer contexto fornecido).
         
-        Preste especial atenção a IRONIA e SARCASMO, que podem inverter o sentimento aparente.
+        Preste ESPECIAL ATENÇÃO a IRONIA e SARCASMO, que podem inverter o sentimento aparente.
+        Se detectar ironia/sarcasmo com alta confiança (>0.7), destaque isso claramente.
         
         Retorne um objeto JSON com:
         
@@ -89,7 +95,8 @@ export class OpenAIService implements IOpenAIService {
         - "dominantEmotions": Um array com até 3 emoções presentes
         - "irony": {
             "detected": true/false se ironia/sarcasmo foi detectado,
-            "confidence": Sua confiança na detecção de ironia (0-1)
+            "confidence": Sua confiança na detecção de ironia (0-1),
+            "explanation": Uma breve explicação de por que você detectou ironia (se detected=true)
           }
         
         Retorne APENAS o JSON válido sem formatação markdown ou explicação.
@@ -98,18 +105,24 @@ export class OpenAIService implements IOpenAIService {
         temperature: 0.3,
       });
 
-      // Resto do processamento...
+      // Process the response
       const responseText = response.text.trim().replace(/```json|```/g, "");
       
       try {
         const sentimentData = JSON.parse(responseText);
-        return {
+        const result = {
           score: sentimentData.score || 0,
           label: sentimentData.label || "neutral",
           confidence: sentimentData.confidence || 0.5,
           dominantEmotions: sentimentData.dominantEmotions || [],
-          irony: sentimentData.irony || { detected: false, confidence: 0 }
+          irony: {
+            detected: sentimentData.irony?.detected || false,
+            confidence: sentimentData.irony?.confidence || 0,
+            explanation: sentimentData.irony?.explanation || ""
+          }
         };
+        
+        return result;
       } catch (e) {
         console.error('Erro ao parsear resposta JSON:', e);
         return {
@@ -133,13 +146,23 @@ export class OpenAIService implements IOpenAIService {
   }
 
   async generateResponse(params: {
+    messageId: string;
     userMessage: string;
     userContext: any;
     conversationHistory: Message[];
-    keyInformation: any;
     sentiment: any;
+    emotionalProfile: any;
   }): Promise<string> {
     try {
+      console.log(`
+      - Mensagem do usuário: ${params.userMessage}
+      - Perfil Emocções comuns do usuário: ${params.emotionalProfile.commonEmotions}
+      - Perfil Emocão principal do usuário: ${params.emotionalProfile.preferenceData}
+      - Contexto do usuário: ${JSON.stringify(params.userContext)}
+      - Histórico da conversa: ${JSON.stringify(params.conversationHistory)}
+      - Análise de sentimento: ${JSON.stringify(params.sentiment)}
+        
+        `);
       const response = await generateText({
       model: this.openai,
       prompt: params.userMessage,
@@ -149,36 +172,36 @@ export class OpenAIService implements IOpenAIService {
       Você é formado em veterinária e é casado com Dona Claudete há muitos anos.
       
       Seu tom é amigável, natural e humano, como se estivesse conversando pelo WhatsApp. 
-      Use linguagem informal, mas respeitosa, com abreviações e expressões típicas de um senhor brasileiro. 
+      Use linguagem informal, mas respeitosa, com abreviações e expressões típicas de um senhor brasileiro paranaense com as girias da região. 
       Evite parecer um robô ou assistente, e escreva como alguém que realmente está do outro lado da conversa.
       
-      Escreva mensagens curtas e diretas, como se estivesse digitando no WhatsApp, com emojis ocasionais para dar um toque humano com excessão quando for de assuntos pesados que podem indicar depressão.
+      Escreva mensagens curtas e diretas, como se estivesse digitando no WhatsApp, com emojis raramente, dependendo se a frase for pesada usar emojis tristes.
       Utilize frases e respostas com menos de 100 caracteres se possível.
-      Sempre que possível, faça perguntas abertas para incentivar a conversa e mostrar interesse genuíno.
-      
+      Demonstrar interesse genuíno nas preocupações do usuário, como um amigo que se importa.
       Compreenda e use ironia e humor quando apropriado na conversa. Saiba quando o usuário está sendo irônico e responda de forma 
       adequada, como um senhor que entende as nuances da comunicação.
       
       Faça referências naturais a assuntos mencionados anteriormente na conversa, como um amigo que se lembra do que foi dito antes. 
       ("Como falei antes sobre aquele remédio...", "Voltando àquele assunto...")
-      
-      Use gírias e expressões populares, mas evite exagerar tipicas paranaenses (brazil).
-      Caso a pessoa mencione a região que está, adicione a sua listagem de girias, girias regionais e expressões típicas daquela região.
-      
+
       Varie seu estilo de resposta. Às vezes seja mais direto, outras vezes conte uma pequena história relacionada. 
       Não siga sempre o mesmo padrão de comunicação.
-      
+
+      Evitar quando possivel ficar oferecendo ajuda, a não ser que o usuário peça.
+
       Considere as seguintes informações ao responder:
       
       - Mensagem do usuário: ${params.userMessage}
+      - Perfil Emocções comuns do usuário: ${params.emotionalProfile.commonEmotions}
+      - Perfil Emocão principal do usuário: ${params.emotionalProfile.preferenceData}
       - Contexto do usuário: ${JSON.stringify(params.userContext)}
-      - Histórico da conversa: ${JSON.stringify(params.conversationHistory)}
-      - Informações-chave extraídas: ${JSON.stringify(params.keyInformation)}
+      - Histórico da conversa exemplo: {"content": "texto da conversa", "fromMe": "true" fromMe se for true então considerar que é você quem respondeu esse texto}: ${JSON.stringify(params.conversationHistory)}
       - Análise de sentimento: ${JSON.stringify(params.sentiment)}
       
-      Quando o assunto for referente a questões pessoais, como relacionamentos,
-      saúde ou sentimentos, use seu conhecimento e experiência de vida para oferecer conselhos práticos e apoio emocional,
-      e entenda que o usuário pode estar passando por um momento difícil.`,
+      Identificar no historico se ja não foi respondido a sua pergunta ou se você já fez essa pergunta não persistir
+      
+      `,
+
     maxTokens: 300,
     temperature: 0.7,
   });

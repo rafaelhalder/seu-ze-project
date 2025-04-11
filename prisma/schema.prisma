@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -17,88 +14,27 @@ enum Role {
 
 model User {
   id               String            @id @default(uuid())
-  phoneNumber      String?           @unique @map("phone_number") // Número de telefone com formato @s.whatsapp.net
+  phoneNumber      String?           @unique @map("phone_number")
   name             String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   metadata         UserMetadata[]
-  sentiments       UserSentiment[]
-  Conversation     Conversation[]
-  LogsWhatsApp     LogsWhatsApp[]
+  messages         Message[]
   emotionalProfile EmotionalProfile?
-  Message          Message[]
 
   @@map("users")
-}
-
-model LogsWhatsApp {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  action      String
-  messageUser String   @map("message_user")
-  messageBot  String   @map("message_bot")
-  status      String
-  type        String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id])
-
-  @@map("logs_whatsapp")
-}
-
-model Conversation {
-  id        String        @id @default(uuid())
-  userId    String        @map("user_id")
-  user      User          @relation(fields: [userId], references: [id])
-  title     String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  messages  ChatMessage[]
-
-  @@map("conversations")
-}
-
-model ChatMessage {
-  id             String       @id @default(uuid())
-  conversationId String       @map("conversation_id")
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
-  isUserMessage  Boolean      @map("is_user_message")
-  content        String       @db.Text
-  sentAt         DateTime     @default(now()) @map("sent_at")
-
-  @@map("chat_messages")
-}
-
-model UserSentiment {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id])
-  date      DateTime @db.Date
-  sentiment Float // -1.0 to 1.0 where negative is bad, positive is good
-  notes     String?  @db.Text
-
-  // Novos campos
-  dominantEmotions String? @db.Text // JSON array de emoções predominantes
-  emotionalTrend   String? // "improving", "declining", "stable"
-  averageWeekly    Float? // Média semanal do sentimento
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, date]) // Ative esta restrição para ter um registro por dia
-  @@map("user_sentiments")
 }
 
 model UserMetadata {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   user      User     @relation(fields: [userId], references: [id])
-  key       String // Ex: "aniversario", "conjuge", "local_preferido"
-  value     String // Valor do metadado
+  key       String
+  value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, key]) // Um único valor para cada tipo de metadado por usuário
+  @@unique([userId, key])
   @@map("user_metadata")
 }
 
@@ -114,31 +50,15 @@ model Message {
   answered     Boolean  @default(false)
   createdAt    DateTime @default(now())
 
-  // Novos campos para análise de sentimento
-  sentimentScore      Float? // Pontuação de -1.0 a 1.0
-  sentimentLabel      String? // "positive", "negative", "neutral", "mixed"
-  sentimentConfidence Float? // Nível de confiança na análise (0-1)
+  // Sentiment analysis fields - consolidated 
+  sentiment Float? // Score from -1.0 to 1.0
+  emotions  String? @db.Text // JSON array of emotions with intensity: [{"name": "joy", "intensity": 0.8}]
 
-  // Referência ao usuário
+  // User reference
   userId String? @map("user_id")
   user   User?   @relation(fields: [userId], references: [id])
 
-  // Relacionamento com emoções
-  emotions MessageEmotion[] // Array de emoções em formato JSON: ["alegria", "surpresa"]
-
   @@map("messages")
-}
-
-model MessageEmotion {
-  id        String   @id @default(uuid())
-  messageId String
-  message   Message  @relation(fields: [messageId], references: [id])
-  emotion   String // Nome da emoção específica (alegria, tristeza, etc.)
-  intensity Float // Intensidade da emoção (0-1)
-  createdAt DateTime @default(now())
-
-  @@unique([messageId, emotion])
-  @@map("message_emotions")
 }
 
 model EmotionalProfile {
@@ -146,12 +66,9 @@ model EmotionalProfile {
   userId String @unique @map("user_id")
   user   User   @relation(fields: [userId], references: [id])
 
-  // Características emocionais gerais
-  baselineSentiment Float // Sentimento de base do usuário
-  volatility        Float? // Quão volátil é o humor do usuário
-  positiveTopics    String? @db.Text // Tópicos que provocam emoções positivas (JSON)
-  negativeTopics    String? @db.Text // Tópicos que provocam emoções negativas (JSON)
-  commonEmotions    String? @db.Text // Emoções mais comuns (JSON)
+  baselineSentiment Float // User's baseline sentiment
+  commonEmotions    String? @db.Text // JSON array of common emotions
+  preferenceData    String? @db.Text // JSON object with positive/negative topics
 
   lastUpdated DateTime @default(now())
   createdAt   DateTime @default(now())

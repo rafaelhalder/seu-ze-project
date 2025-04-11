@@ -3,7 +3,9 @@ import type { IMemoryService } from "@/domain/interfaces/IMemoryService";
 import type { IMessegeHandlerService } from "@/domain/interfaces/IMessageHandlerService";
 import type { IMessageRepository } from "@/domain/interfaces/IMessageRepository";
 import type { IOpenAIService } from "@/domain/interfaces/IOpenAIService";
+import { env } from "@/env";
 import { PrismaClient } from "@prisma/client";
+import axios from "axios";
 
 export class MessageHandlerService implements IMessegeHandlerService{
   private prisma: PrismaClient;
@@ -16,9 +18,8 @@ export class MessageHandlerService implements IMessegeHandlerService{
   }
 
 
-  async handleMessage(message: Message): Promise<void> {
+  async handleMessage(message: any): Promise<void> {
     // Aqui você pode implementar a lógica para lidar com a mensagem recebida
-    // console.log("Mensagem recebida:", message);
     const formattedMessage = this.convertToMessageEntity(message); // Converte a mensagem para a entidade Message
     if (!formattedMessage) {
       console.error('Mensagem inválida ou não suportada');
@@ -33,8 +34,8 @@ export class MessageHandlerService implements IMessegeHandlerService{
 
     if(formattedMessage.type === MessageType.TEXT){
       await this.proccessMessageInformation(formattedMessage);
-
     }
+
   }
 
   private shouldRespondToMessage(message: Message): boolean {
@@ -55,7 +56,6 @@ export class MessageHandlerService implements IMessegeHandlerService{
         message.remoteJid,
         5  // Últimas 5 mensagens
       );
-      
       // Extrair apenas o conteúdo das mensagens
       const messageHistory = recentMessages.map(m => m.content);
       
@@ -64,82 +64,133 @@ export class MessageHandlerService implements IMessegeHandlerService{
         this.openAIService.extractMessageInformation(message.content),
         this.openAIService.analyzeSentiment(message.content, messageHistory)
       ]);
+
       
       // Salvar informações extraídas
       if (Object.keys(keyInformation).length > 0) {
-        console.log(' irá salvar');
         await this.memoryService.saveKeyInformation(message.remoteJid, message.pushName, keyInformation);
       }
 
-      if (sentimentAnalysis && sentimentAnalysis.dominantEmotions && sentimentAnalysis.dominantEmotions?.length > 0) {
+      if (sentimentAnalysis && sentimentAnalysis.dominantEmotions) {
         await this.updateMessageSentiment(message.id, sentimentAnalysis);
+
+        const messageCount = await this.prisma.message.count({
+          where: {
+            remoteJid: message.remoteJid,
+            fromMe: false,
+            answered: false
+          }
+        })
+        if(messageCount % 5 === 0){
+          await this.memoryService.updateEmotionalProfile(message.remoteJid);
+        }
       }
 
-      // Verificar ironia
-      if (sentimentAnalysis?.irony?.detected && sentimentAnalysis.irony.confidence > 0.7) {
-        console.log('Ironia detectada!', sentimentAnalysis.irony);
-        // Lógica adicional para lidar com ironia
-      }
+      const responseText = await this.generateResponse(message, sentimentAnalysis);
 
-      console.log('Informações extraídas:', keyInformation);
+      const responseFormatted = { 
+        ...message, 
+        id: message.id + '-response',
+        fromMe: true ,
+        content: responseText, 
+        rawData: { 
+          ...message.rawData, 
+          key: { 
+        ...message.rawData.key, 
+          } 
+        } 
+      };
 
-      const responseText = await this.generateResponse(message, keyInformation, sentimentAnalysis);
-      console.log('Resposta gerada:', responseText);
+    this.messageRepository.save(responseFormatted); // Salva a mensagem no banco de dados
+    await this.prisma.message.update({
+      where: { id: message.id },
+      data: { answered: true }
+    });
+
+    await this.sendMessage(responseFormatted.remoteJid, responseFormatted.content);
 
     } catch(error) {
       console.error('Erro ao processar informações da mensagem:', error);
     }
   }
-
-  async updateMessageSentiment(messageId: string, 
-    sentiment: { score: number; label: string; confidence: number; dominantEmotions?: string[] }
-  ): Promise<void> {
+  public async sendMessage(phoneNumber: string, message: string): Promise<void>{
     try{
+      const formattedPhone = phoneNumber.includes('@')? phoneNumber.split('@')[0]: phoneNumber;
+      const response = await axios.post(env.URL_SEND_MESSAGE_WHATSAPP, {
+        number: formattedPhone,
+        text: message
+      },{
+        headers:{
+          'Content-Type': 'application/json',
+          'apikey': env.APIKEY
+        }
+      })
+      return response.data;
+    }catch(error){
+      console.error('Erro ao enviar mensagem:', error);
+    }
+  }
+  async updateMessageSentiment(
+    messageId: string, 
+    sentiment: {
+       score: number;
+        label: string;
+         confidence: number;
+          dominantEmotions?: string[];
+            irony?: {
+              detected: boolean;
+              confidence: number;
+              explanation: string;
+            };
+         }
+  ): Promise<void> {
+    try {
+      // Format emotions as JSON array
+      const emotionsJson = sentiment.dominantEmotions?.map((emotion, index) => {
+        // Calculate intensity based on position (first emotions are stronger)
+        const intensity = Math.max(0.1, 1 - (0.2 * index));
+        const explanation = `Emotion detected: ${emotion}`;
+        return { name: emotion, intensity, explanation };
+      });
+
+      const sentimentData = {
+        sentiment: sentiment.score,
+        emotions: emotionsJson ? JSON.stringify(emotionsJson) : null
+      }
+
+      if(sentiment.irony?.detected && sentiment.irony.confidence > 0.5){
+        const emotions = emotionsJson || [];
+        emotions.unshift({
+          name: 'irony',
+          intensity: sentiment.irony.confidence,
+          explanation: sentiment.irony.explanation || "Ironia detected"
+        });
+        sentimentData.emotions = JSON.stringify(emotions);
+      }
+
+      // Update the message with consolidated sentiment data
       await this.prisma.message.update({
         where: { id: messageId },
-        data: {
-          sentimentScore: sentiment.score,
-          sentimentLabel: sentiment.label,
-          sentimentConfidence: sentiment.confidence,
-          // If you want to save emotions too, you'd need additional logic here
-        }
-      });
-          // 2. Salvar as emoções dominantes, se existirem
-    if (sentiment.dominantEmotions && sentiment.dominantEmotions.length > 0) {
-      // Criar um registro para cada emoção
-      const emotionPromises = sentiment.dominantEmotions.map((emotion, index) => {
-        // Calcular uma intensidade aproximada com base na posição no array
-        // Primeira emoção tem intensidade maior, as seguintes têm menos
-        const intensity = 1 - (0.2 * index); 
-          console.log(`intensity:`+ Math.max(0.1, intensity));
-        return this.prisma.messageEmotion.create({
-          data: {
-            messageId,
-            emotion,
-            intensity: Math.max(0.1, intensity) // Garantir que é pelo menos 0.1
-          }
-        });
+        data: sentimentData
       });
       
-      await Promise.all(emotionPromises);
-    }
-    }catch(error){
-      console.error('Error updating message with sentiment:', error);
+    } catch (error) {
+      console.error('Error updating message sentiment:', error);
+      throw new Error('Failed to update message sentiment');
     }
   }
 
   private convertToMessageEntity(evolutionData: any): Message | null {
     try {
       // Verificar se a estrutura básica existe
-      if (!evolutionData || !evolutionData.data || !evolutionData.data.key) {
+      if (!evolutionData || !evolutionData.event) {
         console.warn('Estrutura de mensagem inválida');
         return null;
       }
       
-      const { data } = evolutionData;
+      const { data,event } = evolutionData;
       let messageType = MessageType.UNKNOWN;
       let content = '';
-      
       // Determinar tipo de mensagem e extrair conteúdo
       if (data.messageType === 'conversation' && data.message?.conversation) {
         messageType = MessageType.TEXT;
@@ -172,10 +223,11 @@ export class MessageHandlerService implements IMessegeHandlerService{
         remoteJid: data.key.remoteJid,
         fromMe: data.key.fromMe,
         pushName: data.pushName,
+        eventType: event,
         timestamp: new Date(data.messageTimestamp * 1000),
         type: messageType,
         content: content,
-        rawData: data // Guardar dados brutos para referência futura
+        rawData: data
       });
       
     } catch (error) {
@@ -184,22 +236,23 @@ export class MessageHandlerService implements IMessegeHandlerService{
     }
   }
 
-  private async generateResponse(message: Message, keyInformation: any, sentimentAnalysis:any): Promise<string>{
+  private async generateResponse(message: Message, sentimentAnalysis:any): Promise<string>{
     try{
       const userContext = await this.memoryService.getUserHistory(message.remoteJid);
-      const recentMessages = await this.messageRepository.getRecentMessages(message.remoteJid, 5);
+      const userEmotionalProfile = await this.memoryService.getEmotionalProfile(message.remoteJid);
+      const recentMessages = await this.messageRepository.getRecentMessages(message.remoteJid, 10);
       const messageHistory = recentMessages.map(m => ({
         content: m.content,
-        fromMe: m.fromMe,
-        timestamp: m.timestamp
+        fromMe: m.fromMe
       }));
 
     const response = await this.openAIService.generateResponse({
+      messageId: message.id,
       userMessage: message.content,
       userContext: userContext,
       conversationHistory: messageHistory,
-      keyInformation: keyInformation,
-      sentiment: sentimentAnalysis
+      sentiment: sentimentAnalysis,
+      emotionalProfile: userEmotionalProfile
     });
     return response;
       
